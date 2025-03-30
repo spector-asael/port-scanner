@@ -57,6 +57,8 @@ func main() {
 
 	endPort := flag.String("end-port", "1024", "Enter a number from 0 to 65535")
 
+	timeout := flag.String("timeout", "5", "Enter a timeout for each connection attempt (in seconds)")
+
 	flag.Parse()
 
 	if *target == "" {
@@ -68,19 +70,26 @@ func main() {
 	startPortNumber, err := strconv.Atoi(*startPort)
 
 	if err != nil || startPortNumber < 0 || startPortNumber > 65535 {
-		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.")
+		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
 		os.Exit(1)
 	}
 
 	lastPortNumber, err := strconv.Atoi(*endPort)
 
 	if err != nil || lastPortNumber < 0 || lastPortNumber > 65535 {
-		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.")
+		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+		os.Exit(1)
+	}
+
+	timeoutNumber, err := strconv.Atoi(*timeout)
+
+	if err != nil || timeoutNumber < 0 {
+		fmt.Println("Error: Timeout must be a valid number.", err)
 		os.Exit(1)
 	}
 
 	dialer := net.Dialer{
-		Timeout: 5 * time.Second,
+		Timeout: time.Duration(timeoutNumber) * time.Second,
 	}
 
 	workers := 100
@@ -103,7 +112,7 @@ func main() {
 	elapsedTime := time.Since(startTime)
 
 	fmt.Println("Report summary.")
-	fmt.Printf("Total time elapsed: %.2fs\n", elapsedTime.Seconds())
+	fmt.Printf("Time elapsed: %.2fs\n", elapsedTime.Seconds())
 	fmt.Printf("Total number of ports scanned: %d (Port %s - %s)\n", openPortFound[0], *startPort, *endPort)
 	fmt.Print("Open ports found: [ ")
 	for i := 1; i < len(openPortFound); i++ {
