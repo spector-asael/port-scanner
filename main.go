@@ -83,7 +83,7 @@ func main() {
 
 	timeoutNumber, err := strconv.Atoi(*timeout)
 
-	if err != nil {
+	if err != nil || timeoutNumber < 0 {
 		fmt.Println("Error: Timeout must be a valid number.", err)
 		os.Exit(1)
 	}
@@ -112,7 +112,7 @@ func main() {
 	elapsedTime := time.Since(startTime)
 
 	fmt.Println("Report summary.")
-	fmt.Printf("Total time elapsed: %.2fs\n", elapsedTime.Seconds())
+	fmt.Printf("Time elapsed: %.2fs\n", elapsedTime.Seconds())
 	fmt.Printf("Total number of ports scanned: %d (Port %s - %s)\n", openPortFound[0], *startPort, *endPort)
 	fmt.Print("Open ports found: [ ")
 	for i := 1; i < len(openPortFound); i++ {
