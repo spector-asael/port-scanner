@@ -57,6 +57,8 @@ func main() {
 
 	endPort := flag.String("end-port", "1024", "Enter a number from 0 to 65535")
 
+	timeout := flag.String("timeout", "5", "Enter a timeout for each connection attempt (in seconds)")
+
 	flag.Parse()
 
 	if *target == "" {
@@ -68,19 +70,26 @@ func main() {
 	startPortNumber, err := strconv.Atoi(*startPort)
 
 	if err != nil || startPortNumber < 0 || startPortNumber > 65535 {
-		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.")
+		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
 		os.Exit(1)
 	}
 
 	lastPortNumber, err := strconv.Atoi(*endPort)
 
 	if err != nil || lastPortNumber < 0 || lastPortNumber > 65535 {
-		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.")
+		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+		os.Exit(1)
+	}
+
+	timeoutNumber, err := strconv.Atoi(*timeout)
+
+	if err != nil {
+		fmt.Println("Error: Timeout must be a valid number.", err)
 		os.Exit(1)
 	}
 
 	dialer := net.Dialer{
-		Timeout: 5 * time.Second,
+		Timeout: time.Duration(timeoutNumber) * time.Second,
 	}
 
 	workers := 100
