@@ -45,7 +45,7 @@ func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortF
 }
 
 func main() {
-
+	startTime := time.Now()
 	var wg sync.WaitGroup
 	var openPortFound []int = []int{0}
 
@@ -100,7 +100,10 @@ func main() {
 	close(tasks)
 	wg.Wait()
 
+	elapsedTime := time.Since(startTime)
+
 	fmt.Println("Report summary.")
+	fmt.Printf("Total time elapsed: %.2fs\n", elapsedTime.Seconds())
 	fmt.Printf("Total number of ports scanned: %d (Port %s - %s)\n", openPortFound[0], *startPort, *endPort)
 	fmt.Print("Open ports found: [ ")
 	for i := 1; i < len(openPortFound); i++ {
