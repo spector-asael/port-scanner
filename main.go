@@ -13,25 +13,33 @@ import (
 	"time"
 )
 
-func worker(wg *sync.WaitGroup, tasks chan string, dialer net.Dialer) {
+type Address struct {
+	port    string
+	address string
+}
+
+func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortFound *[]int) {
 	defer wg.Done()
 	maxRetries := 3
 	for addr := range tasks {
 		var success bool
+		(*openPortFound)[0]++
 		for i := range maxRetries {
-			conn, err := dialer.Dial("tcp", addr)
+			conn, err := dialer.Dial("tcp", addr.address)
 			if err == nil {
 				conn.Close()
-				fmt.Printf("Connection to %s was successful\n", addr)
+				fmt.Printf("Connection to %s was successful\n", addr.address)
 				success = true
+				portNumber, _ := strconv.Atoi(addr.port)
+				*openPortFound = append(*openPortFound, portNumber)
 				break
 			}
 			backoff := time.Duration(1<<i) * time.Second
-			fmt.Printf("Attempt %d to %s failed. Waiting %v...\n", i+1, addr, backoff)
+			fmt.Printf("Attempt %d to %s failed. Waiting %v...\n", i+1, addr.address, backoff)
 			time.Sleep(backoff)
 		}
 		if !success {
-			fmt.Printf("Failed to connect to %s after %d attempts\n", addr, maxRetries)
+			fmt.Printf("Failed to connect to %s after %d attempts\n", addr.address, maxRetries)
 		}
 	}
 }
@@ -39,7 +47,9 @@ func worker(wg *sync.WaitGroup, tasks chan string, dialer net.Dialer) {
 func main() {
 
 	var wg sync.WaitGroup
-	tasks := make(chan string, 100)
+	var openPortFound []int = []int{0}
+
+	tasks := make(chan Address, 100)
 
 	target := flag.String("target", "", "IP address or hostname to scan (required)")
 
@@ -58,14 +68,14 @@ func main() {
 	startPortNumber, err := strconv.Atoi(*startPort)
 
 	if err != nil || startPortNumber < 0 || startPortNumber > 65535 {
-		fmt.Println("Error: Invalid port range. Ports must be between 0 and 65535.")
+		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.")
 		os.Exit(1)
 	}
 
 	lastPortNumber, err := strconv.Atoi(*endPort)
 
-	if err != nil || lastPortNumber < 0 || startPortNumber > 65535 {
-		fmt.Println("Error: Invalid port range. Ports must be between 0 and 65535.")
+	if err != nil || lastPortNumber < 0 || lastPortNumber > 65535 {
+		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.")
 		os.Exit(1)
 	}
 
@@ -75,18 +85,26 @@ func main() {
 
 	workers := 100
 
-	for i := 1; i <= workers; i++ {
+	for i := 0; i <= workers; i++ {
 		wg.Add(1)
-		go worker(&wg, tasks, dialer)
+		go worker(&wg, tasks, dialer, &openPortFound)
 	}
 
-	ports := 512
+	ports := lastPortNumber
 
-	for p := 1; p <= ports; p++ {
+	for p := startPortNumber; p <= ports; p++ {
 		port := strconv.Itoa(p)
 		address := net.JoinHostPort(*target, port)
-		tasks <- address
+		tasks <- Address{port, address}
 	}
 	close(tasks)
 	wg.Wait()
+
+	fmt.Println("Report summary.")
+	fmt.Printf("Total number of ports scanned: %d (Port %s - %s)\n", openPortFound[0], *startPort, *endPort)
+	fmt.Print("Open ports found: [ ")
+	for i := 1; i < len(openPortFound); i++ {
+		fmt.Printf("%d ", openPortFound[i])
+	}
+	print("]\n")
 }
