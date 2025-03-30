@@ -23,6 +23,7 @@ func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortF
 	maxRetries := 3
 	for addr := range tasks {
 		var success bool
+		// The 0th element represents the count.
 		(*openPortFound)[0]++
 		for i := range maxRetries {
 			conn, err := dialer.Dial("tcp", addr.address)
@@ -31,6 +32,7 @@ func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortF
 				fmt.Printf("Connection to %s was successful\n", addr.address)
 				success = true
 				portNumber, _ := strconv.Atoi(addr.port)
+				// Once an open port is found, it gets appended to the array slice.
 				*openPortFound = append(*openPortFound, portNumber)
 				break
 			}
@@ -45,22 +47,22 @@ func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortF
 }
 
 func main() {
-	startTime := time.Now()
+	startTime := time.Now() // Helps keep track of how long the scanning process takes.
 	var wg sync.WaitGroup
 	var openPortFound []int = []int{0}
+	// An array slice. The 0th element keeps track of the count of elements.
+	// Anything else appended to the slice is an open port found.
 
+	// Initialization of flags
 	tasks := make(chan Address, 100)
-
 	target := flag.String("target", "", "IP address or hostname to scan (required)")
-
 	startPort := flag.String("start-port", "1", "Enter a number from 0 to 65535")
-
 	endPort := flag.String("end-port", "1024", "Enter a number from 0 to 65535")
-
 	timeout := flag.String("timeout", "5", "Enter a timeout for each connection attempt (in seconds)")
 
 	flag.Parse()
 
+	// Error handling for all flags
 	if *target == "" {
 		fmt.Println("Error: -target flag is required")
 		flag.Usage()
@@ -88,6 +90,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Dialer uses a timeoutNumber given by the user.
+	// Defaults to 5 if no value was provided
 	dialer := net.Dialer{
 		Timeout: time.Duration(timeoutNumber) * time.Second,
 	}
@@ -97,18 +101,25 @@ func main() {
 	for i := 0; i <= workers; i++ {
 		wg.Add(1)
 		go worker(&wg, tasks, dialer, &openPortFound)
+		// Adjusted worker to take in the memory address of the openPortFound slice
 	}
 
+	// Since the amount of ports is ranged based
+	// Set this value to the lastPortNumber entered by the user
+	// Defaults to 1024 if no value was provided
 	ports := lastPortNumber
 
+	// startPortNumber defaults to 1 if no port was found.
 	for p := startPortNumber; p <= ports; p++ {
 		port := strconv.Itoa(p)
 		address := net.JoinHostPort(*target, port)
 		tasks <- Address{port, address}
 	}
 	close(tasks)
+
 	wg.Wait()
 
+	// Once the scan finishes, calculate how much time it has been since the scanning started
 	elapsedTime := time.Since(startTime)
 
 	fmt.Println("Report summary.")
