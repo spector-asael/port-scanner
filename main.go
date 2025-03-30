@@ -120,12 +120,17 @@ func main() {
 	// Set this value to the lastPortNumber entered by the user
 	// Defaults to 1024 if no value was provided
 	ports := lastPortNumber
+	totalPorts := lastPortNumber - startPortNumber + 1
+	processedPorts := 0
 
 	// startPortNumber defaults to 1 if no port was found.
 	for p := startPortNumber; p <= ports; p++ {
 		port := strconv.Itoa(p)
 		address := net.JoinHostPort(*target, port)
 		tasks <- Address{port, address}
+
+		processedPorts++
+		fmt.Printf("\rScanning port %d/%d", processedPorts, totalPorts)
 	}
 	close(tasks)
 
