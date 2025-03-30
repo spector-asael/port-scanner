@@ -34,6 +34,15 @@ func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortF
 				portNumber, _ := strconv.Atoi(addr.port)
 				// Once an open port is found, it gets appended to the array slice.
 				*openPortFound = append(*openPortFound, portNumber)
+
+				buffer := make([]byte, 1024)
+				n, err := conn.Read(buffer)
+				if err == nil && n > 0 {
+					fmt.Printf("[Banner] %s: %s\n", addr.address, string(buffer[:n]))
+				} else {
+					fmt.Printf("[Banner] %s: No response\n", addr.address)
+				}
+
 				break
 			}
 			backoff := time.Duration(1<<i) * time.Second
