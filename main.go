@@ -43,9 +43,9 @@ func main() {
 
 	target := flag.String("target", "", "IP address or hostname to scan (required)")
 
-	startPort := flag.String("-start-port", "1", "Enter a number from 0 to 65535")
+	startPort := flag.String("start-port", "1", "Enter a number from 0 to 65535")
 
-	endPort := flag.String("-end-port", "1024", "Enter a number from 0 to 65535")
+	endPort := flag.String("end-port", "1024", "Enter a number from 0 to 65535")
 
 	flag.Parse()
 
