@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,22 +19,20 @@ type Address struct {
 	address string
 }
 
-func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortFound *[]int) {
+func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, count *int, openPortFound *[]Address) {
 	defer wg.Done()
 	maxRetries := 3
 	for addr := range tasks {
 		var success bool
-		// The 0th element represents the count.
-		(*openPortFound)[0]++
+		(*count)++
 		for i := range maxRetries {
 			conn, err := dialer.Dial("tcp", addr.address)
 			if err == nil {
 				defer conn.Close()
 				fmt.Printf("\nConnection to %s was successful\n", addr.address)
 				success = true
-				portNumber, _ := strconv.Atoi(addr.port)
 				// Once an open port is found, it gets appended to the array slice.
-				*openPortFound = append(*openPortFound, portNumber)
+				*openPortFound = append(*openPortFound, addr)
 
 				buffer := make([]byte, 1024)
 				conn.SetReadDeadline(time.Now().Add(2 * time.Second))
@@ -59,14 +58,15 @@ func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortF
 func main() {
 	startTime := time.Now() // Helps keep track of how long the scanning process takes.
 	var wg sync.WaitGroup
-	var openPortFound []int = []int{0}
-	// An array slice. The 0th element keeps track of the count of elements.
+	var openPortFound []Address
+	// An array slice for keeping track of ports found.
+	var count int = 0
 	// Anything else appended to the slice is an open port found.
 
 	// Initialization of flags
 	tasks := make(chan Address, 100)
 	target := flag.String("target", "", "IP address or hostname to scan (required)")
-	targets := flag.String("targets", "", "List of IP address or hostnames to scan using commas")
+	targets := flag.String("targets", "", "List of IP address or hostnames to scan using comma separators")
 	startPort := flag.String("start-port", "1", "Enter a number from 0 to 65535")
 	endPort := flag.String("end-port", "1024", "Enter a number from 0 to 65535")
 	timeout := flag.String("timeout", "5", "Enter a timeout for each connection attempt (in seconds)")
@@ -85,6 +85,14 @@ func main() {
 	if *target != "" && *targets != "" {
 		fmt.Println("Error: Cannot use both -target and -targets flags")
 		os.Exit(1)
+	}
+
+	var targetList []string
+
+	if *target == "" {
+		targetList = strings.Split(*targets, ",")
+	} else {
+		targetList = strings.Split(*targets, ",")
 	}
 
 	startPortNumber, err := strconv.Atoi(*startPort)
@@ -118,7 +126,7 @@ func main() {
 
 	for i := 0; i <= workers; i++ {
 		wg.Add(1)
-		go worker(&wg, tasks, dialer, &openPortFound)
+		go worker(&wg, tasks, dialer, &count, &openPortFound)
 		// Adjusted worker to take in the memory address of the openPortFound slice
 	}
 
@@ -130,13 +138,16 @@ func main() {
 	processedPorts := 0
 
 	// startPortNumber defaults to 1 if no port was found.
-	for p := startPortNumber; p <= ports; p++ {
-		port := strconv.Itoa(p)
-		address := net.JoinHostPort(*target, port)
-		tasks <- Address{port, address}
+	for _, target := range targetList {
+		fmt.Printf("\nScanning target: %s\n", target)
+		for p := startPortNumber; p <= ports; p++ {
+			port := strconv.Itoa(p)
+			address := net.JoinHostPort(target, port)
+			tasks <- Address{port, address}
 
-		processedPorts++
-		fmt.Printf("\rScanning port %d/%d", processedPorts, totalPorts)
+			processedPorts++
+			fmt.Printf("\rScanning port %d/%d", processedPorts, totalPorts)
+		}
 	}
 	close(tasks)
 
@@ -147,10 +158,10 @@ func main() {
 
 	fmt.Println("Report summary.")
 	fmt.Printf("Time elapsed: %.2fs\n", elapsedTime.Seconds())
-	fmt.Printf("Total number of ports scanned: %d (Port %s - %s)\n", openPortFound[0], *startPort, *endPort)
+	fmt.Printf("Total number of ports scanned: %d (Port %s - %s)\n", count, *startPort, *endPort)
 	fmt.Print("Open ports found: [ ")
-	for i := 1; i < len(openPortFound); i++ {
-		fmt.Printf("%d ", openPortFound[i])
+	for i := 0; i < len(openPortFound); i++ {
+		fmt.Printf("%s ", openPortFound[i].address)
 	}
 	print("]\n")
 }
