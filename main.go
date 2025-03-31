@@ -67,9 +67,10 @@ func main() {
 	tasks := make(chan Address, 100)
 	target := flag.String("target", "", "IP address or hostname to scan (required)")
 	targets := flag.String("targets", "", "List of IP address or hostnames to scan using comma separators")
-	startPort := flag.String("start-port", "1", "Enter a number from 0 to 65535")
-	endPort := flag.String("end-port", "1024", "Enter a number from 0 to 65535")
+	startPort := flag.String("start-port", "", "Enter a number from 0 to 65535")
+	endPort := flag.String("end-port", "", "Enter a number from 0 to 65535")
 	timeout := flag.String("timeout", "5", "Enter a timeout for each connection attempt (in seconds)")
+	portsFlag := flag.String("ports", "", "Enter ports using commas")
 
 	flag.Parse()
 
@@ -89,24 +90,54 @@ func main() {
 
 	var targetList []string
 
-	if *target == "" {
-		targetList = strings.Split(*targets, ",")
+	if *targets == "" {
+		targetList = []string{*target}
 	} else {
 		targetList = strings.Split(*targets, ",")
 	}
 
-	startPortNumber, err := strconv.Atoi(*startPort)
+	if *portsFlag == "" {
+		if *startPort == "" {
+			*startPort = "1"
+		}
 
-	if err != nil || startPortNumber < 0 || startPortNumber > 65535 {
-		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
-		os.Exit(1)
+		if *endPort == "" {
+			*endPort = "1024"
+		}
+	}
+	var portsList []string
+	if *portsFlag != "" {
+		portsList = strings.Split(*portsFlag, ",")
 	}
 
-	lastPortNumber, err := strconv.Atoi(*endPort)
+	for _, p := range portsList {
+		j, err := strconv.Atoi(p)
+		if err != nil || j < 0 || j > 65535 {
+			fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+			os.Exit(1)
+		}
+	}
 
-	if err != nil || lastPortNumber < 0 || lastPortNumber > 65535 {
-		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
-		os.Exit(1)
+	var startPortNumber, lastPortNumber int
+	var err error
+
+	if *startPort != "" && *endPort != "" {
+		startPortNumber, err = strconv.Atoi(*startPort)
+
+		if err != nil || startPortNumber < 0 || startPortNumber > 65535 {
+			fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+			os.Exit(1)
+		}
+
+		lastPortNumber, err = strconv.Atoi(*endPort)
+
+		if err != nil || lastPortNumber < 0 || lastPortNumber > 65535 {
+			fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+			os.Exit(1)
+		}
+	} else {
+		startPortNumber = 0
+		lastPortNumber = 0
 	}
 
 	timeoutNumber, err := strconv.Atoi(*timeout)
@@ -134,7 +165,7 @@ func main() {
 	// Set this value to the lastPortNumber entered by the user
 	// Defaults to 1024 if no value was provided
 	ports := lastPortNumber
-	totalPorts := lastPortNumber - startPortNumber + 1
+	totalPorts := (lastPortNumber - startPortNumber + 1) * len(targetList)
 	processedPorts := 0
 
 	// startPortNumber defaults to 1 if no port was found.
@@ -148,7 +179,19 @@ func main() {
 			processedPorts++
 			fmt.Printf("\rScanning port %d/%d", processedPorts, totalPorts)
 		}
+
+		for _, p := range portsList {
+			fmt.Printf("\nScanning target: %s\n", target)
+			address := net.JoinHostPort(target, p)
+			tasks <- Address{p, address}
+
+			processedPorts++
+			fmt.Printf("\rScanning port %d/%d", processedPorts, totalPorts)
+
+		}
 	}
+	fmt.Println()
+
 	close(tasks)
 
 	wg.Wait()
