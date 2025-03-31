@@ -29,31 +29,29 @@ func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortF
 			conn, err := dialer.Dial("tcp", addr.address)
 			if err == nil {
 				defer conn.Close()
-				fmt.Printf("Connection to %s was successful\n", addr.address)
+				fmt.Printf("\nConnection to %s was successful\n", addr.address)
 				success = true
 				portNumber, _ := strconv.Atoi(addr.port)
 				// Once an open port is found, it gets appended to the array slice.
 				*openPortFound = append(*openPortFound, portNumber)
 
 				buffer := make([]byte, 1024)
-				conn.Write([]byte("GET / HTTP/1.1\r\n" +
-					"Host: " + addr.address + "\r\n" +
-					"Connection: close\r\n\r\n"))
+				conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 				numberOfBytes, err := conn.Read(buffer)
 				if err == nil && numberOfBytes > 0 {
 					fmt.Printf("[Banner] %s: %s\n", addr.address, string(buffer[:numberOfBytes]))
 				} else {
 					fmt.Printf("[Banner] %s: No response\n", addr.address)
 				}
-
+				fmt.Println("")
 				break
 			}
 			backoff := time.Duration(1<<i) * time.Second
-			fmt.Printf("Attempt %d to %s failed. Waiting %v...\n", i+1, addr.address, backoff)
+			// fmt.Printf("Attempt %d to %s failed. Waiting %v...\n", i+1, addr.address, backoff)
 			time.Sleep(backoff)
 		}
 		if !success {
-			fmt.Printf("Failed to connect to %s after %d attempts\n", addr.address, maxRetries)
+			// fmt.Printf("Failed to connect to %s after %d attempts\n", addr.address, maxRetries)
 		}
 	}
 }
