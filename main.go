@@ -28,12 +28,24 @@ func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, openPortF
 		for i := range maxRetries {
 			conn, err := dialer.Dial("tcp", addr.address)
 			if err == nil {
-				conn.Close()
+				defer conn.Close()
 				fmt.Printf("Connection to %s was successful\n", addr.address)
 				success = true
 				portNumber, _ := strconv.Atoi(addr.port)
 				// Once an open port is found, it gets appended to the array slice.
 				*openPortFound = append(*openPortFound, portNumber)
+
+				buffer := make([]byte, 1024)
+				conn.Write([]byte("GET / HTTP/1.1\r\n" +
+					"Host: " + addr.address + "\r\n" +
+					"Connection: close\r\n\r\n"))
+				numberOfBytes, err := conn.Read(buffer)
+				if err == nil && numberOfBytes > 0 {
+					fmt.Printf("[Banner] %s: %s\n", addr.address, string(buffer[:numberOfBytes]))
+				} else {
+					fmt.Printf("[Banner] %s: No response\n", addr.address)
+				}
+
 				break
 			}
 			backoff := time.Duration(1<<i) * time.Second
