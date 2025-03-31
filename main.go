@@ -66,6 +66,7 @@ func main() {
 	// Initialization of flags
 	tasks := make(chan Address, 100)
 	target := flag.String("target", "", "IP address or hostname to scan (required)")
+	targets := flag.String("targets", "", "List of IP address or hostnames to scan using commas")
 	startPort := flag.String("start-port", "1", "Enter a number from 0 to 65535")
 	endPort := flag.String("end-port", "1024", "Enter a number from 0 to 65535")
 	timeout := flag.String("timeout", "5", "Enter a timeout for each connection attempt (in seconds)")
@@ -73,9 +74,16 @@ func main() {
 	flag.Parse()
 
 	// Error handling for all flags
-	if *target == "" {
+
+	// Having a target flag is required, but you can only use one
+	if *target == "" && *targets == "" {
 		fmt.Println("Error: -target flag is required")
 		flag.Usage()
+		os.Exit(1)
+	}
+
+	if *target != "" && *targets != "" {
+		fmt.Println("Error: Cannot use both -target and -targets flags")
 		os.Exit(1)
 	}
 
