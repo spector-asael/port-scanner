@@ -24,7 +24,7 @@ type PortScanResult struct {
 func worker(wg *sync.WaitGroup, tasks chan string, dialer net.Dialer, openPorts *[]PortScanResult, mu *sync.Mutex, totalPorts, scanned *int) {
 	defer wg.Done()
 	maxRetries := 3
-
+	fmt.Printf("\rScanning port %d/%d...", *scanned, *totalPorts)
 	for addr := range tasks {
 		var success bool
 		var banner string
@@ -45,8 +45,6 @@ func worker(wg *sync.WaitGroup, tasks chan string, dialer net.Dialer, openPorts 
 				if n > 0 {
 					banner = strings.TrimSpace(string(buffer[:n]))
 					fmt.Printf(`Response from %s: %s\n`, addr, banner)
-				} else {
-					fmt.Printf(`No response from %s, bytes read: %d\n`, addr, n)
 				}
 				conn.Close()
 
@@ -146,8 +144,8 @@ func main() {
 
 	workers, err := strconv.Atoi(*workersFlag)
 
-	if err != nil && workers <= 0 {
-		fmt.Println("Error: Invalid number of works used.")
+	if err != nil || workers <= 0 {
+		fmt.Println("Error: Invalid number of workers used.")
 		os.Exit(1)
 	}
 
@@ -185,7 +183,7 @@ func main() {
 		Timeout: time.Duration(timeoutNumber) * time.Second,
 	}
 
-	totalPorts := (lastPortNumber - startPortNumber + 1) * len(targetList)
+	totalPorts := ((lastPortNumber - startPortNumber + 1) + len(portsList)) * len(targetList)
 	scanned := 0
 
 	for i := 0; i < workers; i++ {
