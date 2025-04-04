@@ -1,9 +1,9 @@
 // Filename: main.go
-// Purpose: This program demonstrates how to create a TCP network connection using Go
 
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -14,22 +14,17 @@ import (
 	"time"
 )
 
-type Address struct {
-	port    string
-	address string
-}
-
 type PortScanResult struct {
-	Target string
-	Port   int
-	Status string
-	Banner string
+	Target string `json:"target"`
+	Port   int    `json:"port"`
+	Status string `json:"status"`
+	Banner string `json:"banner,omitempty"`
 }
 
 func worker(wg *sync.WaitGroup, tasks chan string, dialer net.Dialer, openPorts *[]PortScanResult, mu *sync.Mutex, totalPorts, scanned *int) {
 	defer wg.Done()
 	maxRetries := 3
-
+	fmt.Printf("\rScanning port %d/%d...", *scanned, *totalPorts)
 	for addr := range tasks {
 		var success bool
 		var banner string
@@ -50,8 +45,6 @@ func worker(wg *sync.WaitGroup, tasks chan string, dialer net.Dialer, openPorts 
 				if n > 0 {
 					banner = strings.TrimSpace(string(buffer[:n]))
 					fmt.Printf(`Response from %s: %s\n`, addr, banner)
-				} else {
-					fmt.Printf(`No response from %s, bytes read: %d\n`, addr, n)
 				}
 				conn.Close()
 
@@ -67,7 +60,6 @@ func worker(wg *sync.WaitGroup, tasks chan string, dialer net.Dialer, openPorts 
 
 			backoff := time.Duration(1<<i) * time.Second
 			time.Sleep(backoff)
-
 		}
 
 		if !success {
@@ -97,6 +89,7 @@ func main() {
 	timeout := flag.String("timeout", "5", "Enter a timeout for each connection attempt (in seconds)")
 	portsFlag := flag.String("ports", "", "Enter ports using commas as seperators")
 	workersFlag := flag.String("workers", "100", "Enter the number of workers you'd like to use.")
+	jsonFlag := flag.Bool("json", false, "Use this flag to ouput scan results in json format")
 
 	flag.Parse()
 
@@ -151,8 +144,8 @@ func main() {
 
 	workers, err := strconv.Atoi(*workersFlag)
 
-	if err != nil && workers <= 0 {
-		fmt.Println("Error: Invalid number of works used.")
+	if err != nil || workers <= 0 {
+		fmt.Println("Error: Invalid number of workers used.")
 		os.Exit(1)
 	}
 
@@ -190,8 +183,7 @@ func main() {
 		Timeout: time.Duration(timeoutNumber) * time.Second,
 	}
 
-	workers = 100
-	totalPorts := (lastPortNumber - startPortNumber + 1) * len(targetList)
+	totalPorts := ((lastPortNumber - startPortNumber + 1) + len(portsList)) * len(targetList)
 	scanned := 0
 
 	for i := 0; i < workers; i++ {
@@ -220,9 +212,32 @@ func main() {
 	// Once the scan finishes, calculate how much time it has been since the scanning started
 	elapsedTime := time.Since(startTime)
 
-	fmt.Println("Report summary.")
+	// If the user wants JSON output, print the results and exit
+	if *jsonFlag {
+		// Include the summary report in JSON format
+		summary := struct {
+			Elapsed      string           `json:"elapsed_time"`
+			TotalScanned int              `json:"total_ports_scanned"`
+			OpenPorts    []PortScanResult `json:"open_ports"`
+		}{
+			Elapsed:      fmt.Sprintf("%.2fs", elapsedTime.Seconds()),
+			TotalScanned: totalPorts,
+			OpenPorts:    openPortFound,
+		}
+
+		output, err := json.MarshalIndent(summary, "", "  ")
+		if err != nil {
+			fmt.Println("Error encoding JSON output:", err)
+			os.Exit(1)
+		}
+
+		fmt.Println(string(output))
+		return
+	}
+
+	fmt.Println("\nReport summary.")
 	fmt.Printf("Time elapsed: %.2fs\n", elapsedTime.Seconds())
-	fmt.Printf("Total number of ports scanned: %d", totalPorts)
+	fmt.Printf("Total number of ports scanned: %d\n", totalPorts)
 	fmt.Print("Open ports found: [ ")
 	for i := 0; i < len(openPortFound); i++ {
 		fmt.Printf("%s:%d ", openPortFound[i].Target, openPortFound[i].Port) // Fixed format to match PortScanResult
