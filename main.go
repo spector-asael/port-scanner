@@ -19,69 +19,95 @@ type Address struct {
 	address string
 }
 
-func worker(wg *sync.WaitGroup, tasks chan Address, dialer net.Dialer, count *int, openPortFound *[]Address) {
+type PortScanResult struct {
+	Target string
+	Port   int
+	Status string
+	Banner string
+}
+
+func worker(wg *sync.WaitGroup, tasks chan string, dialer net.Dialer, openPorts *[]PortScanResult, mu *sync.Mutex, totalPorts, scanned *int) {
 	defer wg.Done()
 	maxRetries := 3
+
 	for addr := range tasks {
 		var success bool
-		(*count)++
-		for i := range maxRetries {
-			conn, err := dialer.Dial("tcp", addr.address)
-			if err == nil {
-				defer conn.Close()
-				fmt.Printf("\nConnection to %s was successful\n", addr.address)
-				success = true
-				// Once an open port is found, it gets appended to the array slice.
-				*openPortFound = append(*openPortFound, addr)
+		var banner string
+		parts := strings.Split(addr, ":")
+		port, _ := strconv.Atoi(parts[1])
+		target := parts[0]
 
-				buffer := make([]byte, 1024)
+		for i := 0; i < maxRetries; i++ {
+			conn, err := dialer.Dial("tcp", addr)
+			if err == nil {
 				conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-				numberOfBytes, err := conn.Read(buffer)
-				if err == nil && numberOfBytes > 0 {
-					fmt.Printf("[Banner] %s: %s\n", addr.address, string(buffer[:numberOfBytes]))
-				} else {
-					fmt.Printf("[Banner] %s: No response\n", addr.address)
+				buffer := make([]byte, 1024)
+				n, err := conn.Read(buffer)
+				if err != nil {
+					fmt.Printf("Error reading from %s:%d: %v\n", target, port, err)
+					banner = "" // Handle empty or error response
 				}
-				fmt.Println("")
+				if n > 0 {
+					banner = strings.TrimSpace(string(buffer[:n]))
+					fmt.Printf(`Response from %s: %s\n`, addr, banner)
+				} else {
+					fmt.Printf(`No response from %s, bytes read: %d\n`, addr, n)
+				}
+				conn.Close()
+
+				// Locking the mutex to safely append to the openPorts slice
+				mu.Lock()
+				*openPorts = append(*openPorts, PortScanResult{Target: target, Port: port, Status: "open", Banner: banner})
+				mu.Unlock()
+
+				fmt.Printf("\r[OPEN] %s:%d %s\n", target, port, banner)
+				success = true
 				break
 			}
+
 			backoff := time.Duration(1<<i) * time.Second
-			// fmt.Printf("Attempt %d to %s failed. Waiting %v...\n", i+1, addr.address, backoff)
 			time.Sleep(backoff)
+
 		}
+
 		if !success {
-			// fmt.Printf("Failed to connect to %s after %d attempts\n", addr.address, maxRetries)
+			fmt.Printf("\rFailed to connect to %s:%d\n", target, port)
 		}
+
+		// Locking the mutex for safely updating the 'scanned' counter
+		mu.Lock()
+		*scanned++
+		fmt.Printf("\rScanning port %d/%d...", *scanned, *totalPorts)
+		mu.Unlock()
 	}
 }
 
 func main() {
 	startTime := time.Now() // Helps keep track of how long the scanning process takes.
 	var wg sync.WaitGroup
-	var openPortFound []Address
-	// An array slice for keeping track of ports found.
-	var count int = 0
-	// Anything else appended to the slice is an open port found.
+	var openPortFound []PortScanResult // Stores all open ports found
+	var mu sync.Mutex                  // Mutex to safely update shared variables for the port scan
 
 	// Initialization of flags
-	tasks := make(chan Address, 100)
+	tasks := make(chan string, 100)
 	target := flag.String("target", "", "IP address or hostname to scan (required)")
-	targets := flag.String("targets", "", "List of IP address or hostnames to scan using comma separators")
-	startPort := flag.String("start-port", "1", "Enter a number from 0 to 65535")
-	endPort := flag.String("end-port", "1024", "Enter a number from 0 to 65535")
+	targets := flag.String("targets", "", "List of IP address or hostnames to scan using comma seperators")
+	startPort := flag.String("start-port", "", "Enter a number from 0 to 65535")
+	endPort := flag.String("end-port", "", "Enter a number from 0 to 65535")
 	timeout := flag.String("timeout", "5", "Enter a timeout for each connection attempt (in seconds)")
+	portsFlag := flag.String("ports", "", "Enter ports using commas as seperators")
+	workersFlag := flag.String("workers", "100", "Enter the number of workers you'd like to use.")
 
 	flag.Parse()
 
 	// Error handling for all flags
-
-	// Having a target flag is required, but you can only use one
 	if *target == "" && *targets == "" {
 		fmt.Println("Error: -target flag is required")
 		flag.Usage()
 		os.Exit(1)
 	}
 
+	// Having a target flag is required, but you can only use either -target or -targets
 	if *target != "" && *targets != "" {
 		fmt.Println("Error: Cannot use both -target and -targets flags")
 		os.Exit(1)
@@ -89,24 +115,66 @@ func main() {
 
 	var targetList []string
 
-	if *target == "" {
-		targetList = strings.Split(*targets, ",")
+	if *targets == "" {
+		targetList = []string{*target}
 	} else {
 		targetList = strings.Split(*targets, ",")
 	}
 
-	startPortNumber, err := strconv.Atoi(*startPort)
+	// The default if no -port or -ports flag was provided.
+	// The default is overrided if -ports was provided
+	// This is to not force users to use the default 1-1024
+	// if they don't use the -start-port and -endport flag
+	if *portsFlag == "" {
+		if *startPort == "" {
+			*startPort = "1"
+		}
 
-	if err != nil || startPortNumber < 0 || startPortNumber > 65535 {
-		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+		if *endPort == "" {
+			*endPort = "1024"
+		}
+	}
+
+	var portsList []string
+	if *portsFlag != "" {
+		portsList = strings.Split(*portsFlag, ",")
+	}
+
+	// Validation to check if ports are a valid number
+	for _, p := range portsList {
+		j, err := strconv.Atoi(p)
+		if err != nil || j < 0 || j > 65535 {
+			fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+			os.Exit(1)
+		}
+	}
+
+	workers, err := strconv.Atoi(*workersFlag)
+
+	if err != nil && workers <= 0 {
+		fmt.Println("Error: Invalid number of works used.")
 		os.Exit(1)
 	}
 
-	lastPortNumber, err := strconv.Atoi(*endPort)
+	var startPortNumber, lastPortNumber int
 
-	if err != nil || lastPortNumber < 0 || lastPortNumber > 65535 {
-		fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
-		os.Exit(1)
+	if *startPort != "" && *endPort != "" {
+		startPortNumber, err = strconv.Atoi(*startPort)
+
+		if err != nil || startPortNumber < 0 || startPortNumber > 65535 {
+			fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+			os.Exit(1)
+		}
+
+		lastPortNumber, err = strconv.Atoi(*endPort)
+
+		if err != nil || lastPortNumber < 0 || lastPortNumber > 65535 {
+			fmt.Println("Error: Invalid port. Ports must be a number between 0 and 65535.", err)
+			os.Exit(1)
+		}
+	} else {
+		startPortNumber = 0
+		lastPortNumber = 0
 	}
 
 	timeoutNumber, err := strconv.Atoi(*timeout)
@@ -122,35 +190,31 @@ func main() {
 		Timeout: time.Duration(timeoutNumber) * time.Second,
 	}
 
-	workers := 100
+	workers = 100
+	totalPorts := (lastPortNumber - startPortNumber + 1) * len(targetList)
+	scanned := 0
 
-	for i := 0; i <= workers; i++ {
+	for i := 0; i < workers; i++ {
 		wg.Add(1)
-		go worker(&wg, tasks, dialer, &count, &openPortFound)
-		// Adjusted worker to take in the memory address of the openPortFound slice
+		go worker(&wg, tasks, dialer, &openPortFound, &mu, &totalPorts, &scanned)
 	}
 
-	// Since the amount of ports is ranged based
-	// Set this value to the lastPortNumber entered by the user
-	// Defaults to 1024 if no value was provided
+	// Set the total number of ports to scan
 	ports := lastPortNumber
-	totalPorts := lastPortNumber - startPortNumber + 1
-	processedPorts := 0
-
-	// startPortNumber defaults to 1 if no port was found.
 	for _, target := range targetList {
-		fmt.Printf("\nScanning target: %s\n", target)
 		for p := startPortNumber; p <= ports; p++ {
 			port := strconv.Itoa(p)
 			address := net.JoinHostPort(target, port)
-			tasks <- Address{port, address}
+			tasks <- address // Send address as a string
+		}
 
-			processedPorts++
-			fmt.Printf("\rScanning port %d/%d", processedPorts, totalPorts)
+		for _, p := range portsList {
+			address := net.JoinHostPort(target, p)
+			tasks <- address // Send address as a string
 		}
 	}
-	close(tasks)
 
+	close(tasks)
 	wg.Wait()
 
 	// Once the scan finishes, calculate how much time it has been since the scanning started
@@ -158,10 +222,10 @@ func main() {
 
 	fmt.Println("Report summary.")
 	fmt.Printf("Time elapsed: %.2fs\n", elapsedTime.Seconds())
-	fmt.Printf("Total number of ports scanned: %d (Port %s - %s)\n", count, *startPort, *endPort)
+	fmt.Printf("Total number of ports scanned: %d", totalPorts)
 	fmt.Print("Open ports found: [ ")
 	for i := 0; i < len(openPortFound); i++ {
-		fmt.Printf("%s ", openPortFound[i].address)
+		fmt.Printf("%s:%d ", openPortFound[i].Target, openPortFound[i].Port) // Fixed format to match PortScanResult
 	}
-	print("]\n")
+	fmt.Println("]")
 }
